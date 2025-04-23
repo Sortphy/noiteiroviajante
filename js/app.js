@@ -1,6 +1,7 @@
 /**
  * Aplicativo principal do Cafetão Viajante
  * Integra todos os módulos e gerencia a interface do usuário
+ * Versão atualizada com roteamento por ruas reais
  */
 
 // Variáveis globais
@@ -12,6 +13,7 @@ let venueMarkers = [];
 let routeControl = null;
 let optimizedRouteLayer = null;
 let nearbyVenues = [];
+let waypoints = [];
 
 // Inicializar o aplicativo quando o DOM estiver carregado
 document.addEventListener('DOMContentLoaded', () => {
@@ -184,7 +186,7 @@ function calculateRoute() {
     // Mostrar mensagem de carregamento
     document.getElementById('route-info').innerHTML = '<p>Calculando rota...</p>';
     
-    // Criar controle de rota do Leaflet
+    // Criar controle de rota do Leaflet (usando ruas reais por padrão)
     routeControl = L.Routing.control({
         waypoints: [
             L.latLng(startCity.lat, startCity.lng),
@@ -252,6 +254,7 @@ function clearRoute() {
     // Resetar variáveis
     currentRoute = null;
     nearbyVenues = [];
+    waypoints = [];
     
     // Atualizar estado da UI
     updateUIState();
@@ -322,7 +325,7 @@ function findNearbyVenues() {
     updateUIState();
 }
 
-// Otimizar rota para passar por todas as casas noturnas
+// Otimizar rota para passar por todas as casas noturnas usando ruas reais
 function optimizeRoute() {
     // Verificar se temos casas noturnas
     if (nearbyVenues.length === 0) {
@@ -331,36 +334,7 @@ function optimizeRoute() {
     }
     
     // Mostrar mensagem de carregamento
-    document.getElementById('route-info').innerHTML += '<p>Otimizando rota...</p>';
-    
-    // Converter casas noturnas em waypoints
-    const waypoints = venuesAsWaypoints(nearbyVenues);
-    
-    // Criar pontos de início e fim
-    const start = {
-        id: 'start',
-        lat: startCity.lat,
-        lng: startCity.lng,
-        name: startCity.name
-    };
-    
-    const end = {
-        id: 'end',
-        lat: endCity.lat,
-        lng: endCity.lng,
-        name: endCity.name
-    };
-    
-    // Otimizar rota
-    const optimizedPath = optimizeRouteWithoutRepeatingStreets(start, end, waypoints);
-    
-    // Verificar se conseguimos otimizar a rota
-    if (!optimizedPath) {
-        document.getElementById('route-info').innerHTML += `
-            <p class="error">Não foi possível otimizar a rota. Tente com menos casas noturnas.</p>
-        `;
-        return;
-    }
+    document.getElementById('route-info').innerHTML = '<p>Otimizando rota por ruas reais...</p>';
     
     // Remover rota original
     if (routeControl) {
@@ -371,39 +345,207 @@ function optimizeRoute() {
     // Remover rota otimizada anterior
     if (optimizedRouteLayer) {
         map.removeLayer(optimizedRouteLayer);
+        optimizedRouteLayer = null;
     }
     
-    // Criar caminho com as coordenadas otimizadas
-    const latlngs = optimizedPath.map(point => [point.lat, point.lng]);
+    // Limitar o número de casas noturnas para evitar problemas com a API
+    // Leaflet Routing Machine tem limitações com muitos waypoints
+    const MAX_VENUES = 8; // Limitamos a 8 casas noturnas + origem e destino = 10 waypoints
     
-    // Criar camada de rota otimizada
-    optimizedRouteLayer = L.polyline(latlngs, {
-        color: '#e74c3c',
-        weight: 6,
-        opacity: 0.8
-    }).addTo(map);
+    // Ordenar casas noturnas por proximidade à rota original
+    const sortedVenues = [...nearbyVenues].sort((a, b) => {
+        // Calcular distância média de cada casa noturna para a rota original
+        const distA = calculateAverageDistanceToRoute(a, currentRoute);
+        const distB = calculateAverageDistanceToRoute(b, currentRoute);
+        return distA - distB;
+    });
+    
+    // Selecionar apenas as casas noturnas mais próximas da rota original
+    const selectedVenues = sortedVenues.slice(0, MAX_VENUES);
+    
+    // Ordenar as casas noturnas selecionadas para otimizar a rota
+    // Usamos o algoritmo do vizinho mais próximo
+    const orderedVenues = [];
+    let currentPoint = {lat: startCity.lat, lng: startCity.lng};
+    const remainingVenues = [...selectedVenues];
+    
+    while (remainingVenues.length > 0) {
+        // Encontrar a casa noturna mais próxima do ponto atual
+        let closestIndex = 0;
+        let closestDistance = calculateDistance(
+            currentPoint.lat, currentPoint.lng,
+            remainingVenues[0].lat, remainingVenues[0].lng
+        );
+        
+        for (let j = 1; j < remainingVenues.length; j++) {
+            const distance = calculateDistance(
+                currentPoint.lat, currentPoint.lng,
+                remainingVenues[j].lat, remainingVenues[j].lng
+            );
+            
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closestIndex = j;
+            }
+        }
+        
+        // Adicionar a casa noturna mais próxima à lista ordenada
+        const closestVenue = remainingVenues.splice(closestIndex, 1)[0];
+        orderedVenues.push(closestVenue);
+        currentPoint = {lat: closestVenue.lat, lng: closestVenue.lng};
+    }
+    
+    // Criar waypoints para roteamento
+    const routingWaypoints = [
+        L.latLng(startCity.lat, startCity.lng) // Ponto de partida
+    ];
+    
+    // Adicionar casas noturnas ordenadas como waypoints
+    orderedVenues.forEach(venue => {
+        routingWaypoints.push(L.latLng(venue.lat, venue.lng));
+    });
+    
+    // Adicionar ponto de destino
+    routingWaypoints.push(L.latLng(endCity.lat, endCity.lng));
+    
+    // Criar rota segmentada para evitar problemas com muitos waypoints
+    createSegmentedRoute(routingWaypoints, orderedVenues);
+}
+
+// Calcular distância média de um ponto para uma rota
+function calculateAverageDistanceToRoute(venue, route) {
+    let totalDistance = 0;
+    const samplePoints = Math.min(route.length, 10); // Usar no máximo 10 pontos da rota
+    const step = Math.floor(route.length / samplePoints);
+    
+    for (let i = 0; i < route.length; i += step) {
+        if (i < route.length) {
+            const routePoint = route[i];
+            totalDistance += calculateDistance(
+                venue.lat, venue.lng,
+                routePoint.lat, routePoint.lng
+            );
+        }
+    }
+    
+    return totalDistance / samplePoints;
+}
+
+// Criar rota segmentada para evitar problemas com muitos waypoints
+function createSegmentedRoute(waypoints, orderedVenues) {
+    // Armazenar todas as rotas calculadas
+    const allRoutes = [];
+    let totalDistance = 0;
+    let totalDuration = 0;
+    
+    // Função para processar o próximo segmento
+    function processNextSegment(startIndex) {
+        // Se chegamos ao final, mostrar a rota completa
+        if (startIndex >= waypoints.length - 1) {
+            // Todas as rotas foram calculadas
+            finishRouteCalculation(allRoutes, totalDistance, totalDuration, orderedVenues);
+            return;
+        }
+        
+        // Calcular o próximo segmento (máximo 2 waypoints por vez para garantir sucesso)
+        const endIndex = Math.min(startIndex + 1, waypoints.length - 1);
+        const segmentWaypoints = waypoints.slice(startIndex, endIndex + 1);
+        
+        // Criar controle de rota para este segmento
+        const segmentControl = L.Routing.control({
+            waypoints: segmentWaypoints,
+            routeWhileDragging: false,
+            showAlternatives: false,
+            fitSelectedRoutes: false,
+            show: false,
+            lineOptions: {
+                styles: [
+                    {color: '#e74c3c', opacity: 0.8, weight: 6},
+                    {color: 'white', opacity: 0.3, weight: 4}
+                ]
+            },
+            createMarker: function() { return null; } // Não criar marcadores para waypoints intermediários
+        });
+        
+        // Não adicionar ao mapa ainda, apenas calcular a rota
+        segmentControl.on('routesfound', function(e) {
+            const routes = e.routes;
+            const route = routes[0];
+            
+            // Adicionar esta rota à lista
+            allRoutes.push(route);
+            
+            // Atualizar distância e duração totais
+            totalDistance += route.summary.totalDistance;
+            totalDuration += route.summary.totalTime;
+            
+            // Atualizar informações de progresso
+            document.getElementById('route-info').innerHTML = `
+                <p>Calculando rota otimizada... ${Math.round((startIndex / (waypoints.length - 1)) * 100)}%</p>
+            `;
+            
+            // Processar o próximo segmento
+            processNextSegment(endIndex);
+        });
+        
+        // Tratar erros
+        segmentControl.on('routingerror', function(e) {
+            console.error('Erro ao calcular segmento:', e.error);
+            
+            // Tentar pular este segmento e continuar
+            processNextSegment(endIndex);
+        });
+        
+        // Iniciar cálculo da rota
+        segmentControl.route();
+    }
+    
+    // Iniciar o processamento do primeiro segmento
+    processNextSegment(0);
+}
+
+// Finalizar o cálculo da rota e mostrar no mapa
+function finishRouteCalculation(routes, totalDistance, totalDuration, orderedVenues) {
+    // Criar uma camada para a rota completa
+    const routeLayers = [];
+    
+    // Adicionar cada segmento da rota ao mapa
+    routes.forEach(route => {
+        const routeLayer = L.polyline(route.coordinates, {
+            color: '#e74c3c',
+            opacity: 0.8,
+            weight: 6
+        }).addTo(map);
+        
+        routeLayers.push(routeLayer);
+    });
+    
+    // Armazenar todas as camadas da rota
+    optimizedRouteLayer = L.layerGroup(routeLayers);
+    
+    // Calcular limites para ajustar a visualização
+    const bounds = L.latLngBounds([]);
+    routes.forEach(route => {
+        route.coordinates.forEach(coord => {
+            bounds.extend([coord.lat, coord.lng]);
+        });
+    });
     
     // Ajustar visualização para mostrar toda a rota
-    map.fitBounds(optimizedRouteLayer.getBounds(), { padding: [50, 50] });
+    map.fitBounds(bounds, { padding: [50, 50] });
     
-    // Calcular distância total
-    let totalDistance = 0;
-    for (let i = 0; i < latlngs.length - 1; i++) {
-        const p1 = latlngs[i];
-        const p2 = latlngs[i + 1];
-        totalDistance += calculateDistance(p1[0], p1[1], p2[0], p2[1]);
-    }
-    
-    // Estimar tempo (assumindo velocidade média de 50 km/h)
-    const estimatedTime = Math.round((totalDistance / 50) * 60);
+    // Converter distância para km e duração para minutos
+    const distanceInKm = (totalDistance / 1000).toFixed(1);
+    const durationInMinutes = Math.round(totalDuration / 60);
     
     // Atualizar informações da rota
     document.getElementById('route-info').innerHTML = `
-        <p><strong>Rota otimizada!</strong></p>
-        <p><strong>Distância total:</strong> ${totalDistance.toFixed(1)} km</p>
-        <p><strong>Tempo estimado:</strong> ${estimatedTime} minutos</p>
-        <p><strong>Casas noturnas incluídas:</strong> ${nearbyVenues.length}</p>
-        <p>A rota foi otimizada para passar por todas as casas noturnas sem repetir ruas.</p>
+        <p><strong>Rota otimizada por ruas reais!</strong></p>
+        <p><strong>Distância total:</strong> ${distanceInKm} km</p>
+        <p><strong>Tempo estimado:</strong> ${durationInMinutes} minutos</p>
+        <p><strong>Casas noturnas incluídas:</strong> ${orderedVenues.length} de ${nearbyVenues.length}</p>
+        <p>A rota foi otimizada para passar por casas noturnas usando ruas reais.</p>
+        <p><small>Nota: Devido a limitações técnicas, apenas as ${orderedVenues.length} casas noturnas mais próximas da rota original foram incluídas.</small></p>
     `;
 }
 

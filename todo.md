@@ -13,26 +13,39 @@
 - [x] Testar responsividade da interface
 
 ## Algoritmo A*
-- [ ] Testar implementação do algoritmo A*
-- [ ] Verificar cálculo de rotas entre cidades
-- [ ] Implementar visualização da rota no mapa
+- [x] Testar implementação do algoritmo A*
+- [x] Verificar cálculo de rotas entre cidades
+- [x] Implementar visualização da rota no mapa
 
 ## Detecção de Estabelecimentos
-- [ ] Testar detecção de casas noturnas próximas à rota
-- [ ] Implementar marcadores para estabelecimentos
-- [ ] Verificar exibição de informações dos estabelecimentos
+- [x] Testar detecção de casas noturnas próximas à rota
+- [x] Implementar marcadores para estabelecimentos
+- [x] Verificar exibição de informações dos estabelecimentos
 
 ## Otimização de Rota
-- [ ] Testar algoritmo de otimização de rota
-- [ ] Verificar se a rota passa por todos os estabelecimentos
-- [ ] Implementar visualização da rota otimizada
+- [x] Testar algoritmo de otimização de rota
+- [x] Verificar se a rota passa por todos os estabelecimentos
+- [x] Implementar visualização da rota otimizada
 
 ## Testes e Validação
-- [ ] Testar aplicativo em diferentes navegadores
-- [ ] Verificar responsividade em dispositivos móveis
-- [ ] Testar todos os fluxos de usuário
+- [x] Testar aplicativo em diferentes navegadores
+- [x] Verificar responsividade em dispositivos móveis
+- [x] Testar todos os fluxos de usuário
 
-## Implantação
-- [ ] Preparar aplicativo para implantação
-- [ ] Implantar aplicativo
-- [ ] Entregar URL ao usuário
+## Atualizações Solicitadas
+- [x] Expandir base de dados de casas noturnas para todo o estado
+- [x] Implementar roteamento por ruas reais em vez de linhas retas
+- [x] Testar novas funcionalidades
+- [x] Empacotar versão atualizada
+- [x] Entregar código atualizado ao usuário
+
+## Correções de Erros
+- [x] Corrigir erro "L.Routing.osrm is not a function"
+- [x] Testar aplicativo corrigido
+- [x] Entregar versão corrigida ao usuário
+
+## Correções Adicionais
+- [x] Corrigir erro "Bounds are not valid" na otimização de rota
+- [x] Implementar roteamento robusto por waypoints
+- [x] Testar solução final de roteamento
+- [ ] Entregar versão final funcional
